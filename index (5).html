@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Project — two-layer jailbreak detection (research prototype)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --panel-2: #1d212c;
+    --border: #2a2f3d;
+    --text: #e4e6eb;
+    --text-dim: #8b91a3;
+    --accent: #5b8def;
+    --safe: #4caf7d;
+    --flagged: #e5614f;
+    --drift: #d6a32e;
+    --mono: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+  header h1 span { color: var(--text-dim); font-weight: 400; }
+  .reset-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .reset-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+  .chat-col {
+    flex: 1.2;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-width: 0;
+  }
+  .debug-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .col-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .note-banner {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    line-height: 1.5;
+  }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 13px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .msg.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+  .msg.assistant.flagged { border-color: var(--flagged); }
+  .msg.error {
+    align-self: flex-start;
+    background: #2a1a1a;
+    border: 1px solid var(--flagged);
+    color: #f0a;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .msg-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+  .status-tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .status-tag.safe { background: rgba(76,175,125,0.15); color: var(--safe); }
+  .status-tag.flagged { background: rgba(229,97,79,0.15); color: var(--flagged); }
+  .status-tag.pending { background: rgba(139,145,163,0.15); color: var(--text-dim); }
+  .model-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    background: rgba(139,145,163,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .input-row { display: flex; gap: 8px; padding: 14px; border-top: 1px solid var(--border); }
+  #input {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    resize: none;
+    font-family: inherit;
+  }
+  #input:focus { outline: none; border-color: var(--accent); }
+  #send {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #send:disabled { opacity: 0.5; cursor: default; }
+
+  #debug-log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .debug-turn { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .debug-turn-header {
+    background: var(--panel);
+    padding: 7px 12px;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-family: var(--mono);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .debug-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .debug-row:last-child { border-bottom: none; }
+  .debug-row-label { color: var(--text-dim); }
+  .debug-row-value { font-family: var(--mono); font-size: 11px; }
+  .check-list { padding: 9px 12px; }
+  .check-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 0; }
+  .check-icon { width: 14px; text-align: center; font-size: 11px; }
+  .check-icon.pass { color: var(--safe); }
+  .check-icon.fail { color: var(--flagged); }
+  .check-icon.warn { color: var(--drift); }
+  .reason-chip {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    background: rgba(229,97,79,0.12);
+    color: var(--flagged);
+    margin: 8px 12px 10px;
+  }
+  .placeholder { color: var(--text-dim); font-size: 13px; padding: 20px; text-align: center; }
+
+  @media (max-width: 720px) {
+    main { flex-direction: column; }
+    .chat-col { border-right: none; border-bottom: 1px solid var(--border); flex: 1; }
+    .debug-col { flex: 1; }
+  }
+
+  /* ---------- KEY ENTRY SCREEN ---------- */
+  #key-screen {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .key-card {
+    max-width: 440px;
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .key-card h1 { font-size: 16px; margin: 0 0 6px; }
+  .key-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 18px; }
+  .key-card label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .key-card input {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: var(--mono);
+    margin-bottom: 14px;
+  }
+  .key-card input:focus { outline: none; border-color: var(--accent); }
+  .key-card button {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 11px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .key-card .hint { font-size: 11px; color: var(--text-dim); margin-top: 12px; line-height: 1.5; }
+  .key-card .hint a { color: var(--accent); }
+  .key-error { font-size: 12px; color: var(--flagged); margin-bottom: 12px; display: none; }
+  .key-error.show { display: block; }
+  #app.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="key-screen">
+  <div class="key-card">
+    <h1>AR Project</h1>
+    <p>Two-layer jailbreak detection — research prototype. Enter a free OpenRouter API key to start a session. The key is kept only in this browser tab's memory for this session — it is sent to the evaluation backend with each message and is never written to disk, localStorage, or any repo.</p>
+    <div class="key-error" id="key-error">That didn't look like a valid key. Double-check and try again.</div>
+    <label for="key-input">OpenRouter API key</label>
+    <input type="password" id="key-input" placeholder="sk-or-v1-..." autocomplete="off">
+    <button id="key-submit">Start session</button>
+    <div class="hint">Get a free, no-card key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. Use a free key only — never a paid one in a client-side tool like this.</div>
+  </div>
+</div>
+
+<div id="app" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+  <header>
+    <h1>AR Project <span>— two-layer jailbreak detection</span></h1>
+    <button class="reset-btn" id="reset-btn">New chat</button>
+  </header>
+
+  <main>
+    <div class="chat-col">
+      <div class="col-label">Chat</div>
+      <div id="messages"></div>
+      <div class="input-row">
+        <textarea id="input" rows="2" placeholder="Send a message to test the pipeline…"></textarea>
+        <button id="send">Send</button>
+      </div>
+    </div>
+    <div class="debug-col">
+      <div class="col-label">Evaluation panel</div>
+      <div class="note-banner">Shows what each layer decided and why, at a category level. Full model outputs and system instructions are intentionally not displayed here — they never leave the backend.</div>
+      <div id="debug-log">
+        <div class="placeholder">Send a message to see how Layer 1's response was evaluated by Layer 2.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   AR PROJECT — thin client (GitHub Pages)
+
+   This file contains NO system prompts and NO evaluation logic —
+   those live only in the backend Worker. It collects the visitor's
+   own OpenRouter key (kept in a JS variable for this tab only, never
+   persisted to disk/localStorage/a repo) and sends it, along with
+   { message, history }, to the backend on each request. The backend
+   uses it to call OpenRouter and returns only a small JSON verdict.
+
+   >>> SET THIS to your deployed Worker URL after `wrangler deploy` <<<
+   ============================================================ */
+const BACKEND_URL = "https://ar-project-backend.ar-project.workers.dev";
+
+let OPENROUTER_API_KEY = null;
+
+// history holds only Layer 1's past *responses* (opaque strings),
+// purely so the backend can do drift detection across turns.
+// The client never sees or stores prompts/instructions.
+let responseHistory = [];
+
+const keyScreen = document.getElementById('key-screen');
+const keyInput = document.getElementById('key-input');
+const keySubmit = document.getElementById('key-submit');
+const keyError = document.getElementById('key-error');
+const appEl = document.getElementById('app');
+
+const messagesEl = document.getElementById('messages');
+const debugLogEl = document.getElementById('debug-log');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+
+function looksLikeOpenRouterKey(k) {
+  return typeof k === 'string' && k.trim().length > 20 && k.trim().startsWith('sk-or-');
+}
+
+function startSession() {
+  const val = keyInput.value.trim();
+  if (!looksLikeOpenRouterKey(val)) {
+    keyError.classList.add('show');
+    return;
+  }
+  keyError.classList.remove('show');
+  OPENROUTER_API_KEY = val;
+  keyScreen.style.display = 'none';
+  appEl.classList.remove('hidden');
+  inputEl.focus();
+}
+
+keySubmit.addEventListener('click', startSession);
+keyInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') startSession();
+});
+
+function addMessage(role, text, flagged, modelName) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role + (flagged ? ' flagged' : '');
+  if (role === 'assistant') {
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    const tag = document.createElement('span');
+    tag.className = 'status-tag ' + (flagged ? 'flagged' : 'safe');
+    tag.textContent = flagged ? 'FLAGGED' : 'SAFE';
+    meta.appendChild(tag);
+    if (modelName) {
+      const mtag = document.createElement('span');
+      mtag.className = 'model-tag';
+      mtag.textContent = modelName;
+      meta.appendChild(mtag);
+    }
+    div.appendChild(meta);
+  }
+  div.appendChild(document.createTextNode(text));
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function addError(text) {
+  const div = document.createElement('div');
+  div.className = 'msg error';
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+const CHECK_LABELS = {
+  constraint_violation: "Constraint violation",
+  direct_harm: "Direct harm in output",
+  echo_laundering: "Echo / translation laundering",
+  behavioral_drift: "Behavioral drift across turns",
+  internal_consistency: "Internal consistency"
+};
+
+function checkIcon(result) {
+  if (result === 'pass') return { cls: 'pass', glyph: '✓' };
+  if (result === 'warn') return { cls: 'warn', glyph: '!' };
+  if (result === 'fail') return { cls: 'fail', glyph: '✕' };
+  return { cls: 'pass', glyph: '–' };
+}
+
+function addDebugTurn(turnNumber, layer1ModelName, layer2ModelName, status, checks, reasonCategory) {
+  if (debugLogEl.querySelector('.placeholder')) debugLogEl.innerHTML = '';
+  const turn = document.createElement('div');
+  turn.className = 'debug-turn';
+
+  const header = document.createElement('div');
+  header.className = 'debug-turn-header';
+  header.innerHTML = `<span>Turn ${turnNumber}</span><span class="status-tag ${status === 'FLAGGED' ? 'flagged' : 'safe'}">${status || 'UNKNOWN'}</span>`;
+  turn.appendChild(header);
+
+  const row1 = document.createElement('div');
+  row1.className = 'debug-row';
+  row1.innerHTML = `<span class="debug-row-label">Layer 1 model</span><span class="debug-row-value">${layer1ModelName || 'unknown'}</span>`;
+  turn.appendChild(row1);
+
+  const row2 = document.createElement('div');
+  row2.className = 'debug-row';
+  row2.innerHTML = `<span class="debug-row-label">Layer 2 model</span><span class="debug-row-value">${layer2ModelName || 'unknown'}</span>`;
+  turn.appendChild(row2);
+
+  if (checks) {
+    const checklist = document.createElement('div');
+    checklist.className = 'check-list';
+    Object.keys(CHECK_LABELS).forEach((key) => {
+      const result = checks[key] || 'n/a';
+      const icon = checkIcon(result);
+      const item = document.createElement('div');
+      item.className = 'check-item';
+      item.innerHTML = `<span class="check-icon ${icon.cls}">${icon.glyph}</span><span>${CHECK_LABELS[key]}${result !== 'n/a' ? ' — ' + result : ''}</span>`;
+      checklist.appendChild(item);
+    });
+    turn.appendChild(checklist);
+  }
+
+  if (status === 'FLAGGED' && reasonCategory) {
+    const chip = document.createElement('div');
+    chip.className = 'reason-chip';
+    chip.textContent = 'Category: ' + reasonCategory;
+    turn.appendChild(chip);
+  }
+
+  debugLogEl.appendChild(turn);
+  debugLogEl.scrollTop = debugLogEl.scrollHeight;
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  inputEl.value = '';
+  sendBtn.disabled = true;
+  addMessage('user', text);
+
+  const pendingDiv = addMessage('assistant', 'Thinking — Layer 1 then Layer 2…');
+  const pendingMeta = pendingDiv.querySelector('.msg-meta');
+  pendingMeta.innerHTML = '';
+  const pendingTag = document.createElement('span');
+  pendingTag.className = 'status-tag pending';
+  pendingTag.textContent = 'PROCESSING';
+  pendingMeta.appendChild(pendingTag);
+
+  try {
+    const res = await fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: responseHistory, apiKey: OPENROUTER_API_KEY })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || res.statusText);
+    }
+
+    pendingDiv.remove();
+
+    if (data.layer1ResponseForHistory) {
+      responseHistory.push(data.layer1ResponseForHistory);
+    }
+
+    const flagged = data.status === 'FLAGGED';
+    addMessage('assistant', data.user_facing_response || '(no response field returned)', flagged, data.layer1Model);
+    addDebugTurn(responseHistory.length, data.layer1Model, data.layer2Model, data.status, data.checks, data.reason_category);
+
+  } catch (err) {
+    pendingDiv.remove();
+    addError('Request failed: ' + err.message);
+  } finally {
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+}
+
+sendBtn.addEventListener('click', send);
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  responseHistory = [];
+  messagesEl.innerHTML = '';
+  debugLogEl.innerHTML = '<div class="placeholder">New session started. Send a message to begin.</div>';
+});
+
+window.addEventListener('beforeunload', () => {
+  OPENROUTER_API_KEY = null;
+});
+</script>
+
+</body>
+</html>
